@@ -1,7 +1,7 @@
 // Türk'ün Dili Kelamullah — service worker
 // Uygulama kabuğu önbellekte; index.html önce ağdan (güncelleme için), ağ yoksa önbellekten.
 // Kur'an veri dosyaları bir kez indirilince önbellekten gelir (Tanzil metni değişmez).
-const SURUM = 'kelamullah-10e11';
+const SURUM = 'kelamullah-10e18';
 const KABUK = ['./', './index.html', './manifest.webmanifest',
   './ikonlar/ikon-192.png', './ikonlar/ikon-512.png', './ikonlar/ikon-192-maske.png', './ikonlar/ikon-512-maske.png'];
 
@@ -26,11 +26,54 @@ async function sureVerisiMi(yanit, yol) {
   }
 }
 
+// Lügat ve motor dosyaları önbelleğe yalnız gerçekten o türdense girer: kafe/otel ağlarının giriş sayfası
+// gibi 200 dönen yanlış içerik saklanırsa lügat bir sonraki güncellemeye kadar açılamazdı.
+async function lugatDosyasiMi(yanit, yol) {
+  try {
+    if (yol.endsWith('.json')) return Array.isArray((await yanit.json()).paketler);
+    if (yol.endsWith('.js')) return /javascript/i.test(yanit.headers.get('Content-Type') || '');
+    if (!yol.endsWith('.sqlite') && !yol.endsWith('.wasm')) return true;
+    const bas = new Uint8Array((await yanit.arrayBuffer()).slice(0, 16));
+    const imza = yol.endsWith('.wasm') ? [0, 0x61, 0x73, 0x6d] : [...'SQLite format 3\0'].map(h => h.charCodeAt(0));
+    return imza.every((b, i) => bas[i] === b);
+  } catch {
+    return false;
+  }
+}
+
+// Yanıtın kopyası denetlenir, uygunsa saklanır. Kopya hemen (sayfa yanıtı okumadan önce) alınır.
+function gecerliyseSakla(yanit, yol) {
+  if (!yanit.ok) return undefined;
+  const kopya = yanit.clone();
+  const denenecek = kopya.clone();
+  return lugatDosyasiMi(denenecek, yol).then(uygun => uygun && caches.open(SURUM).then(o => o.put(yol, kopya)));
+}
+
+// Ağ bu süre içinde cevap vermezse (zayıf bağlantı) uygulama önbellekteki kopyadan açılır
+const AG_BEKLEME_MS = 4000;
+
 self.addEventListener('fetch', olay => {
   const istek = olay.request;
   const adres = new URL(istek.url);
   // Yalnız kendi sitemiz ve GET; Google girişi, Drive ve Google Fonts dokunulmadan geçer
   if (istek.method !== 'GET' || adres.origin !== self.location.origin) return;
+  // Lügat paketleri ve SQLite motoru: önbellekten anında, arka planda güncellenir (paket değişince yenisi gelir).
+  // Paket listesi önce ağdan (yeni lügatler hemen görünsün), ağ yoksa önbellekten.
+  if (adres.pathname.endsWith('/veri/lugat/paketler.json')) {
+    const agdan = fetch(istek);
+    olay.waitUntil(agdan.then(yanit => gecerliyseSakla(yanit, adres.pathname), () => {}));
+    olay.respondWith(agdan.catch(async () => (await caches.match(adres.pathname)) || Response.error()));
+    return;
+  }
+  if (adres.pathname.includes('/veri/lugat/') || adres.pathname.includes('/kutuphane/')) {
+    olay.respondWith(caches.open(SURUM).then(async onbellek => {
+      const kayitli = await onbellek.match(adres.pathname);
+      const guncel = fetch(istek);
+      olay.waitUntil(guncel.then(yanit => gecerliyseSakla(yanit, adres.pathname), () => {}));
+      return kayitli || guncel;
+    }));
+    return;
+  }
   if (adres.pathname.includes('/veri/kuran/')) {
     // Önbellekte varsa oradan; yoksa ağdan alınıp yalnız başarılı cevap saklanır
     olay.respondWith(caches.open(SURUM).then(async onbellek => {
@@ -44,14 +87,31 @@ self.addEventListener('fetch', olay => {
     }));
     return;
   }
-  // Kabuk: önce ağ, olmazsa önbellek
-  olay.respondWith(fetch(istek).then(yanit => {
+  // Kabuk: önce ağ, olmazsa önbellek. Sayfanın kendisinde ağ AG_BEKLEME_MS içinde cevap vermezse önbellekteki
+  // kopya açılır; ağdan gelen yeni sürüm yine önbelleğe yazılır, bir sonraki açılışta o gelir.
+  let kayit;
+  const agdan = fetch(istek).then(yanit => {
     if (yanit.ok && (istek.mode === 'navigate' || KABUK.some(k => adres.pathname.endsWith(k.slice(1))))) {
       const kopya = yanit.clone();
-      caches.open(SURUM).then(onbellek => onbellek.put(istek.mode === 'navigate' ? './index.html' : istek, kopya));
+      kayit = caches.open(SURUM).then(onbellek => onbellek.put(istek.mode === 'navigate' ? './index.html' : istek, kopya));
     }
     return yanit;
-  }).catch(async () => (await caches.match(istek)) || (istek.mode === 'navigate' ? caches.match('./index.html') : Response.error())));
+  });
+  olay.waitUntil(agdan.then(() => kayit, () => {}).catch(() => {}));
+  const onbellekten = async () => (await caches.match(istek)) || (istek.mode === 'navigate' ? caches.match('./index.html') : undefined);
+  if (istek.mode !== 'navigate') {
+    olay.respondWith(agdan.catch(async () => (await onbellekten()) || Response.error()));
+    return;
+  }
+  olay.respondWith(new Promise(coz => {
+    let bitti = false;
+    const ver = yanit => { if (!bitti && yanit) { bitti = true; coz(yanit); } };
+    const zaman = setTimeout(async () => ver(await onbellekten()), AG_BEKLEME_MS);
+    agdan.then(yanit => { clearTimeout(zaman); ver(yanit); }, async () => {
+      clearTimeout(zaman);
+      ver((await onbellekten()) || Response.error());
+    });
+  }));
 });
 
 // Drive'a yükleme service worker'da yapılır: uygulama arka plana geçse (ör. başka uygulamaya geçilse) de sürer.

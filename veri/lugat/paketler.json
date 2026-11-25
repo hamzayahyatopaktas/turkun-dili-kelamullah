@@ -1,0 +1,6 @@
+{
+  "aciklama": "Türev aramasında kullanılan lügatler. Sıra önemlidir: önce ilk lügatte aranır. Yeni lügat: .sqlite dosyasını bu klasöre koyup buraya bir satır ekleyin.",
+  "paketler": [
+    { "dosya": "kamus-i-turki.sqlite", "ad": "Kamus-ı Türkî" }
+  ]
+}
