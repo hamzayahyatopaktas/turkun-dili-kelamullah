@@ -87,6 +87,9 @@ self.addEventListener('fetch', olay => {
     }));
     return;
   }
+  // Uygulamanın kendisi dışındaki sayfalar (ör. gizlilik.html) service worker'a karışmaz: aksi halde
+  // o sayfa "index.html" diye önbelleğe yazılır ve uygulamanın çevrimdışı kopyası bozulurdu.
+  if (istek.mode === 'navigate' && !/\/(index\.html)?$/.test(adres.pathname)) return;
   // Kabuk: önce ağ, olmazsa önbellek. Sayfanın kendisinde ağ AG_BEKLEME_MS içinde cevap vermezse önbellekteki
   // kopya açılır; ağdan gelen yeni sürüm yine önbelleğe yazılır, bir sonraki açılışta o gelir.
   let kayit;
