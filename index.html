@@ -1303,7 +1303,7 @@
     <!-- Application Footer -->
     <footer class="bg-slate-900 border-t border-slate-800 text-center py-3 text-xs text-slate-500">
         Kur'an Kök Harfleri ve Türkçe Kelimeler Paylaşım & Tasarım Uygulaması
-        <span id="surumDamgasi" class="block mt-1 text-[10px] text-slate-600">Sürüm 10e.19</span>
+        <span id="surumDamgasi" class="block mt-1 text-[10px] text-slate-600">Sürüm 10e.20</span>
     </footer>
 
     <script>
@@ -2819,6 +2819,22 @@
         return yazi ? yazi[0].toLocaleUpperCase('tr') + yazi.slice(1) : yazi;
       }
 
+      // Sunucudan gelen türevler: çözülmemiş karakter kodları (&acirc; → â) çözülür. Kod ";" işaretinden
+      // bölünmüşse ("Dal&acirc" + "let") parçalar yeniden birleştirilir.
+      function turevleriOnar(liste) {
+        const coz = yazi => { const t = document.createElement('textarea'); t.innerHTML = yazi; return t.value; };
+        const sonuc = []; const gorulen = new Set();
+        for (let i = 0; i < liste.length; i++) {
+          let k = String(liste[i] ?? '');
+          // Kelime ortasındaki bölünmede devamı küçük harfle başlar; büyük harfle başlayan parça yeni kelimedir
+          while (/&#?[a-z0-9]+$/i.test(k) && /^[a-zçğıöşüâîû]/.test(String(liste[i + 1] ?? ''))) k += ';' + String(liste[++i]);
+          k = coz(k.replace(/&(#?[a-z0-9]+)(?![a-z0-9;])/gi, '&$1;')).replace(/\s+/g, ' ').trim();
+          const anahtar = k.toLocaleLowerCase('tr');
+          if (k && !gorulen.has(anahtar)) { gorulen.add(anahtar); sonuc.push(k); }
+        }
+        return sonuc;
+      }
+
       function turevAramaSatiri(sonuc) {
         const satir = document.createElement('div');
         satir.dataset.turevSatiri = '';
@@ -2826,7 +2842,7 @@
         const ust = document.createElement('label');
         ust.className = 'flex items-center gap-2 text-sm font-bold text-slate-100';
         const sec = document.createElement('input');
-        sec.type = 'checkbox'; sec.checked = true; sec.dataset.sec = ''; sec.className = 'accent-amber-500';
+        sec.type = 'checkbox'; sec.checked = false; sec.dataset.sec = ''; sec.className = 'accent-amber-500';
         const latin = document.createElement('span');
         latin.dataset.latin = ''; latin.textContent = buyukHarfleBasla(sonuc.kelime);
         ust.append(sec, latin);
@@ -2879,7 +2895,7 @@
             if (gecersiz()) return;
             if (yanit.status === 404) { turevAramaDurumu('Bu kök sitede bulunamadı.', true); return; }
             if (!yanit.ok) throw new Error(`HTTP ${yanit.status}`);
-            kelimeler = (await yanit.json()).turevler || [];
+            kelimeler = turevleriOnar((await yanit.json()).turevler || []);
           } catch (hata) {
             if (gecersiz()) return;
             console.error(hata);
@@ -2915,6 +2931,7 @@
       // Seçili satırlar tabloya: aynı kelime varsa yalnız boş Eskimez yazımı doldurulur. Tek geri alma adımı.
       function turevAramaSonucunuYaz() {
         const satirlar = [...document.querySelectorAll('#turevAramaListesi [data-turev-satiri]')].filter(s => s.querySelector('[data-sec]').checked);
+        if (!satirlar.length) { showToast('Önce eklenecek türevleri seçin.', 'error'); return; }
         durum.kart.turevler = durum.kart.turevler.filter(t => t.tr.trim() || t.ar.trim());
         let eklenen = 0, doldurulan = 0;
         satirlar.forEach(satir => {
