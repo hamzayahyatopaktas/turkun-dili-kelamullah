@@ -1303,7 +1303,7 @@
     <!-- Application Footer -->
     <footer class="bg-slate-900 border-t border-slate-800 text-center py-3 text-xs text-slate-500">
         Kur'an Kök Harfleri ve Türkçe Kelimeler Paylaşım & Tasarım Uygulaması
-        <span id="surumDamgasi" class="block mt-1 text-[10px] text-slate-600">Sürüm 10e.20</span>
+        <span id="surumDamgasi" class="block mt-1 text-[10px] text-slate-600">Sürüm 10e.21</span>
     </footer>
 
     <script>
@@ -2795,7 +2795,6 @@
       const ESLESME_ETIKETLERI = {
         tam: ['Tam eşleşme', 'text-emerald-300'],
         yakin: ['Yakın yazım', 'text-sky-300'],
-        coklu: ['Birden çok yazım — seçin', 'text-amber-300'],
         oneri: ['Öneri — kontrol edip seçin', 'text-amber-300'],
         kokdisi: ['Kökle uyuşmuyor — kontrol edip seçin', 'text-amber-300'],
         yok: ['Lügatte bulunamadı', 'text-slate-500']
@@ -2846,32 +2845,23 @@
         const latin = document.createElement('span');
         latin.dataset.latin = ''; latin.textContent = buyukHarfleBasla(sonuc.kelime);
         ust.append(sec, latin);
-        const tur = sonuc.tur === 'tam' && sonuc.secenekler.length > 1 ? 'coklu' : sonuc.tur;
+        const tur = sonuc.tur;
         const [etiket, renk] = ESLESME_ETIKETLERI[tur];
         const bilgi = document.createElement('span');
         bilgi.dataset.eslesme = tur;
-        bilgi.className = `ml-auto text-[11px] font-normal ${renk}`;
-        bilgi.textContent = tur === 'yakin' ? `${etiket}: ${sonuc.secenekler[0].latin}` : etiket;
+        bilgi.className = `ml-auto text-[11px] font-normal text-right ${renk}`;
+        const aday = sonuc.secenekler[0];
+        // Yakın yazımda ve öneride lügatteki kelimenin kendisi gösterilir; birden çok yazımda sıra numarası eklenir
+        bilgi.textContent = (tur === 'yakin' || tur === 'oneri') && aday ? `${etiket.split(' —')[0]}: ${aday.latin}` : etiket;
+        if (sonuc.sira) bilgi.textContent += ` · ${sonuc.sira}`;
         ust.append(bilgi);
         const eskimez = document.createElement('input');
         eskimez.type = 'text'; eskimez.dir = 'rtl'; eskimez.dataset.eskimez = '';
         eskimez.className = 'w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-base text-amber-300 font-serif';
         eskimez.placeholder = 'Eskimez yazım';
         satir.append(ust);
-        // Öneride ve kökle uyuşmayan bulguda hiçbir yazım kendiliğinden seçilmez
-        const secimsiz = tur === 'oneri' || tur === 'kokdisi';
-        if (sonuc.secenekler.length > 1 || secimsiz) {
-          const secim = document.createElement('select');
-          secim.dataset.secenekler = '';
-          secim.className = 'w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-sm text-slate-200';
-          const bos = new Option(secimsiz ? '— yazım seçin —' : '— boş bırak —', '');
-          secim.append(bos, ...sonuc.secenekler.map(s => new Option(`${s.eskimez}  (${s.latin} · ${s.lugat})`, s.eskimez)));
-          // Birden çok tam eşleşmede ilk (kökü en iyi taşıyan) seçili gelir; öneride hiçbiri seçili gelmez
-          secim.value = secimsiz ? '' : sonuc.secenekler[0].eskimez;
-          secim.addEventListener('change', () => { eskimez.value = secim.value; });
-          satir.append(secim);
-        }
-        eskimez.value = secimsiz || tur === 'yok' ? '' : (sonuc.secenekler[0]?.eskimez || '');
+        // Hiçbir satır kendiliğinden seçili gelmez; yazım her satırda hazır durur, istenen satırlar işaretlenir
+        eskimez.value = aday?.eskimez || '';
         satir.append(eskimez);
         return satir;
       }
@@ -2920,7 +2910,11 @@
         }
         if (gecersiz()) return;
         const sonuclar = kelimeler.map(kelime => ({ kelime, ...(lugatlar.length ? lugattaAra(lugatlar, kelime, kok) : { tur: 'yok', secenekler: [] }) }));
-        document.getElementById('turevAramaListesi').replaceChildren(...sonuclar.map(turevAramaSatiri));
+        // Birden çok yazım bulunan kelime her yazım için ayrı satır olur (Âlem → اعلم, عالم, علم); istenenlerin hepsi eklenebilir
+        const satirlar = sonuclar.flatMap(s => s.secenekler.length > 1
+          ? s.secenekler.map((secenek, i) => ({ kelime: s.kelime, tur: s.tur, secenekler: [secenek], sira: `${i + 1}/${s.secenekler.length}` }))
+          : [s]);
+        document.getElementById('turevAramaListesi').replaceChildren(...satirlar.map(turevAramaSatiri));
         document.getElementById('turevAramaEkle').disabled = false;
         document.getElementById('turevAramaEkle').textContent = turevAramaKaynagi === 'tablo' ? 'Tabloya yaz' : 'Tabloya ekle';
         if (lugatlar.length) {
@@ -2938,10 +2932,12 @@
           const tr = satir.querySelector('[data-latin]').textContent.trim();
           // Lügatteki yazım aynen girer (alt/üst elif, medde, hareke dahil)
           const ar = satir.querySelector('[data-eskimez]').value.trim();
-          const mevcut = durum.kart.turevler.find(t => lugatAnahtari(t.tr) === lugatAnahtari(tr));
-          if (mevcut) {
-            if (!mevcut.ar.trim() && ar) { mevcut.ar = ar; doldurulan++; }
-          } else {
+          // Aynı kelime aynı yazımla zaten varsa eklenmez; yazımı boş duruyorsa doldurulur; farklı yazım yeni satır olur
+          const ayniKelime = durum.kart.turevler.filter(t => lugatAnahtari(t.tr) === lugatAnahtari(tr));
+          const bos = ayniKelime.find(t => !t.ar.trim());
+          if (ayniKelime.some(t => t.ar.trim() === ar)) return;
+          if (bos && ar) { bos.ar = ar; doldurulan++; }
+          else {
             durum.kart.turevler.push({ tr, ar });
             eklenen++;
           }
