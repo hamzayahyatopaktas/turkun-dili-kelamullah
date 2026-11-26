@@ -1,7 +1,7 @@
 // Türk'ün Dili Kelamullah — service worker
 // Uygulama kabuğu önbellekte; index.html önce ağdan (güncelleme için), ağ yoksa önbellekten.
 // Kur'an veri dosyaları bir kez indirilince önbellekten gelir (Tanzil metni değişmez).
-const SURUM = 'kelamullah-10e18';
+const SURUM = 'kelamullah-10e19';
 const KABUK = ['./', './index.html', './manifest.webmanifest',
   './ikonlar/ikon-192.png', './ikonlar/ikon-512.png', './ikonlar/ikon-192-maske.png', './ikonlar/ikon-512-maske.png'];
 
